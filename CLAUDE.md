@@ -39,6 +39,13 @@ pip install -r requirements.txt
 python app.py                 # http://localhost:5001
 ```
 
+### News Radar (新闻雷达)
+```bash
+cp .env.example .env          # Fill in DEEPSEEK_API_KEY, PUSH_PROVIDER/PUSH_TOKEN, RSS_FEEDS
+python3 main.py --collect-news    # One manual news cycle: RSS + X -> DeepSeek scoring -> WeChat push
+```
+Scored news is stored in the `news_items` table of `tweets.db` and browsable at `http://localhost:5001/news`. The scheduler runs the news cycle hourly by default (`NEWS_CYCLE_INTERVAL_MINUTES` in `config.py`).
+
 ### Database
 ```bash
 sqlite3 tweets.db "SELECT username, text, like_count FROM tweets ORDER BY collected_at DESC LIMIT 10;"
@@ -65,6 +72,7 @@ main.py --collect
 - **scheduler.py**: Simpler standalone scheduler script using the `schedule` library. Use this for basic cron-like operation without the web UI.
 - **logger.py**: Unified logging configuration with daily rotating file handlers. Both `main.py` and `scheduler.py` call `configure_logging()` on startup to avoid duplicate handlers.
 - **web/app.py**: Flask app on port 5001. Serves a dashboard that reads from the same `tweets.db` and can start/stop the scheduler via `scheduler_module.py` endpoints.
+- **news_pipeline.py**: News Radar orchestrator. `run_news_cycle()` runs one full cycle: fetch RSS (news_fetcher.py) + X candidates from tweets.db → score via DeepSeek (news_scorer.py, one batched request) → store in `news_items` (news_db.py) → push top-scored digest to WeChat (news_pusher.py, Server酱/PushPlus). Synchronous — called from CLI (`--collect-news`) and scheduler thread.
 
 ### Configuration
 All tunables (selectors, scroll settings, paths, timeouts) live in `config.py`. Key settings:

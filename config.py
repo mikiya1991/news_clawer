@@ -7,6 +7,10 @@ from pathlib import Path
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent
 
+# Load environment variables from .env (no-op if missing; .env is gitignored)
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / ".env")
+
 # Database
 DATABASE_PATH = PROJECT_ROOT / "tweets.db"
 DATABASE_CHECK_SAME_THREAD = False
@@ -46,3 +50,41 @@ RETWEET_COUNT_SELECTOR = '[data-testid="retweet"] span'
 DEBUG_SCREENSHOTS = True
 SCREENSHOTS_DIR = PROJECT_ROOT / "debug_screenshots"
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
+
+# News Radar Settings (RSS + X tweets -> DeepSeek scoring -> WeChat push)
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+# WeChat push: "" (disabled), "serverchan", or "pushplus"
+PUSH_PROVIDER = os.getenv("PUSH_PROVIDER", "")
+PUSH_TOKEN = os.getenv("PUSH_TOKEN", "")
+
+# Comma-separated RSS feed URLs
+RSS_FEEDS = [u.strip() for u in os.getenv("RSS_FEEDS", "").split(",") if u.strip()]
+
+NEWS_RSS_MAX_PER_FEED = 10        # Max items taken per RSS feed per cycle
+NEWS_MAX_ITEMS_PER_CYCLE = 30    # Global cap (RSS + X) before scoring
+NEWS_X_LOOKBACK_HOURS = 24       # X candidates window (by collected_at)
+NEWS_X_MIN_LIKES = 100           # Min like_count for X candidates
+NEWS_X_MAX_ITEMS = 15            # Max X candidates per cycle
+NEWS_SCORE_THRESHOLD = 70        # Only push items scoring >= this
+NEWS_STORE_THRESHOLD = 70        # Items below this are filtered (kept=0)
+NEWS_TIMELINE_THRESHOLD = 80     # Only extremely important items on the timeline
+NEWS_TIMELINE_TWEETS_PER_DAY = 5 # Max high-scored X tweets shown per day on the timeline
+NEWS_PUSH_TOP_N = 5              # Max items per digest push
+NEWS_SCHEDULE_ENABLED = True     # Register news job in scheduler_module
+NEWS_CYCLE_INTERVAL_MINUTES = 60 # News cycle frequency in scheduler
+NEWS_HTTP_TIMEOUT = 15           # HTTP timeout (seconds) for RSS/API calls
+
+# AI filter for collected tweets: discard unimportant ones before storing
+AI_FILTER_ENABLED = os.getenv("AI_FILTER_ENABLED", "1") == "1"
+AI_FILTER_MAX_TWEETS = 50        # Max tweets judged per collection cycle
+
+# AI Chinese summaries for English tweets
+AI_SUMMARY_ENABLED = os.getenv("AI_SUMMARY_ENABLED", "1") == "1"
+AI_SUMMARY_MAX_TWEETS = 50       # Max tweets summarized per batch
+
+# AI scoring of tweets: hide low-value ones from dashboard (kept=0)
+TWEET_STORE_THRESHOLD = 60       # Tweets scoring below this are hidden
+TWEET_SCORE_BATCH_SIZE = 50      # Tweets scored per API batch

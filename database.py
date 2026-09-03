@@ -60,9 +60,22 @@ class TweetDatabase:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 url TEXT UNIQUE,
+                ai_summary TEXT DEFAULT '',
+                ai_score INTEGER,
+                kept INTEGER DEFAULT 1,
                 UNIQUE(id)
             )
         ''')
+
+        # Migration: add newer columns to older databases
+        cursor.execute("PRAGMA table_info(tweets)")
+        columns = {row['name'] for row in cursor.fetchall()}
+        if 'ai_summary' not in columns:
+            cursor.execute("ALTER TABLE tweets ADD COLUMN ai_summary TEXT DEFAULT ''")
+        if 'ai_score' not in columns:
+            cursor.execute("ALTER TABLE tweets ADD COLUMN ai_score INTEGER")
+        if 'kept' not in columns:
+            cursor.execute("ALTER TABLE tweets ADD COLUMN kept INTEGER DEFAULT 1")
         
         # Metadata table for tracking collection runs
         cursor.execute('''
@@ -74,6 +87,15 @@ class TweetDatabase:
                 error_message TEXT,
                 status TEXT DEFAULT 'success',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Log of tweets discarded by the AI filter (judged once, never re-judged)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tweet_filter_log (
+                id TEXT PRIMARY KEY,
+                reason TEXT DEFAULT '',
+                filtered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -123,9 +145,9 @@ class TweetDatabase:
             
             # Insert tweet
             cursor.execute('''
-                INSERT INTO tweets 
-                (id, username, text, like_count, retweet_count, view_count, url, collected_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO tweets
+                (id, username, text, like_count, retweet_count, view_count, url, ai_summary, collected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 tweet_data['id'],
                 tweet_data.get('username', ''),
@@ -134,6 +156,7 @@ class TweetDatabase:
                 int(tweet_data.get('retweet_count', 0)),
                 int(tweet_data.get('view_count', 0)),
                 tweet_data.get('url', ''),
+                tweet_data.get('ai_summary', ''),
                 datetime.now()
             ))
             
@@ -213,8 +236,8 @@ class TweetDatabase:
         cursor = self.conn.cursor()
         
         cursor.execute('''
-            SELECT * FROM tweets 
-            WHERE collected_at > datetime('now', '-' || ? || ' hours')
+            SELECT * FROM tweets
+            WHERE kept = 1 AND collected_at > datetime('now', '-' || ? || ' hours')
             ORDER BY collected_at DESC
         ''', (hours,))
         
@@ -224,7 +247,168 @@ class TweetDatabase:
         
         return tweets
     
-    def log_collection_run(self, collection_type: str, tweet_count: int, 
+    def get_tweets_without_score(self, limit: int = 500,
+                                 offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Get tweets that have not been AI-scored yet
+
+        Args:
+            limit: Max number of tweets to return
+            offset: Number of tweets to skip
+
+        Returns:
+            List of tweet dictionaries ordered by collected_at desc
+        """
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM tweets
+            WHERE ai_score IS NULL
+            ORDER BY collected_at DESC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_score(self, tweet_id: str, score: int, kept: int,
+                     summary: str = None) -> bool:
+        """
+        Set AI score and kept flag for a tweet; optionally fill summary
+        only when the tweet has no summary yet
+
+        Args:
+            tweet_id: Tweet id
+            score: 0-100 AI score
+            kept: 1 to keep visible, 0 to hide
+            summary: Chinese summary (only applied if current is empty)
+
+        Returns:
+            True if a row was updated
+        """
+        self.connect()
+        cursor = self.conn.cursor()
+        if summary:
+            cursor.execute('''
+                UPDATE tweets SET ai_score = ?, kept = ?,
+                    ai_summary = CASE WHEN (ai_summary IS NULL OR ai_summary = '')
+                        THEN ? ELSE ai_summary END
+                WHERE id = ?
+            ''', (int(score), int(kept), str(summary)[:200], str(tweet_id)))
+        else:
+            cursor.execute('''
+                UPDATE tweets SET ai_score = ?, kept = ? WHERE id = ?
+            ''', (int(score), int(kept), str(tweet_id)))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def get_tweets_without_summary(self, limit: int = 500) -> List[Dict[str, Any]]:
+        """
+        Get recent tweets that lack an AI summary
+
+        Args:
+            limit: Max number of tweets to return
+
+        Returns:
+            List of tweet dictionaries ordered by collected_at desc
+        """
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM tweets
+            WHERE (ai_summary IS NULL OR ai_summary = '')
+            ORDER BY collected_at DESC
+            LIMIT ?
+        ''', (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_summary(self, tweet_id: str, summary: str) -> bool:
+        """
+        Set the AI summary for a tweet
+
+        Args:
+            tweet_id: Tweet id
+            summary: Chinese summary text
+
+        Returns:
+            True if a row was updated
+        """
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE tweets SET ai_summary = ? WHERE id = ?
+        ''', (str(summary)[:200], str(tweet_id)))
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def get_top_tweets(self, min_score: int = 0,
+                       limit: int = 500) -> List[Dict[str, Any]]:
+        """
+        Get kept tweets scoring at least min_score for the timeline
+
+        Args:
+            min_score: Minimum ai_score
+            limit: Max tweets to return
+
+        Returns:
+            List of tweet dictionaries ordered by score desc
+        """
+        self.connect()
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM tweets
+            WHERE kept = 1 AND ai_score IS NOT NULL AND ai_score >= ?
+            ORDER BY ai_score DESC, collected_at DESC
+            LIMIT ?
+        ''', (min_score, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_discarded_ids(self, tweet_ids: List[str]) -> set:
+        """
+        Return the subset of tweet ids already discarded by the AI filter
+
+        Args:
+            tweet_ids: Candidate tweet ids to check
+
+        Returns:
+            Set of ids present in tweet_filter_log
+        """
+        if not tweet_ids:
+            return set()
+        self.connect()
+        cursor = self.conn.cursor()
+        placeholders = ','.join('?' for _ in tweet_ids)
+        cursor.execute(
+            f'SELECT id FROM tweet_filter_log WHERE id IN ({placeholders})',
+            tweet_ids
+        )
+        return {row['id'] for row in cursor.fetchall()}
+
+    def log_discarded(self, discarded: List[tuple]) -> int:
+        """
+        Record tweets discarded by the AI filter
+
+        Args:
+            discarded: List of (tweet_id, reason) tuples
+
+        Returns:
+            Number of rows written
+        """
+        if not discarded:
+            return 0
+        self.connect()
+        cursor = self.conn.cursor()
+        for tweet_id, reason in discarded:
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO tweet_filter_log (id, reason)
+                    VALUES (?, ?)
+                ''', (str(tweet_id), str(reason)[:200]))
+            except Exception as e:
+                logger.error(f"Error logging discarded tweet {tweet_id}: {e}")
+        self.conn.commit()
+        logger.info(f"Logged {len(discarded)} discarded tweets")
+        return len(discarded)
+
+    def log_collection_run(self, collection_type: str, tweet_count: int,
                           error_message: str = None, status: str = 'success'):
         """
         Log a collection run in metadata table

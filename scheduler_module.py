@@ -4,6 +4,7 @@ Can be controlled via Flask web interface
 """
 import asyncio
 import logging
+import os
 import schedule
 import sys
 import threading
@@ -17,7 +18,7 @@ from typing import Optional, Dict, Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from logger import configure_logging
-from main import collection_cycle
+from main import collection_cycle, login_flow_auto, score_history, rescore_news
 import config
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 _scheduler_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
 _config_file = Path(__file__).parent / 'scheduler_config.json'
+_pid_file = Path(__file__).parent / 'scheduler.pid'
 _log_file = Path(__file__).parent / 'logs' / 'scheduler_history.json'
 _log_history: list = []
 _max_log_entries = 100
@@ -35,12 +37,18 @@ _current_config: Dict[str, Any] = {
     'running': False
 }
 
+# Global job mutex: scheduled and manual jobs are serialized to avoid
+# concurrent browser instances on the shared browser_state and SQLite locks
+_job_lock = threading.Lock()
+_busy_job: Optional[str] = None  # 'collection' | 'news' | 'login' | None
+_history_lock = threading.Lock()
+
 
 # Ensure logs directory exists
 _log_file.parent.mkdir(exist_ok=True)
 
 
-def _collect_tweets():
+def _collect_tweets(headless: bool = True):
     """Run the tweet collection script and log result"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     log_entry = {
@@ -51,7 +59,7 @@ def _collect_tweets():
     _add_log_entry(log_entry)
 
     try:
-        success = asyncio.run(collection_cycle(headless=True))
+        success = asyncio.run(collection_cycle(headless=headless))
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         if success:
             log_entry['status'] = 'success'
@@ -69,13 +77,243 @@ def _collect_tweets():
     _add_log_entry(log_entry)
 
 
+def _collect_news():
+    """Run the news cycle (RSS + X -> DeepSeek scoring -> WeChat push) and log result"""
+    from news_pipeline import run_news_cycle
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = {
+        'timestamp': timestamp,
+        'status': 'running',
+        'message': 'Starting news cycle'
+    }
+    _add_log_entry(log_entry)
+
+    try:
+        result = run_news_cycle()
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        if result.get('error'):
+            log_entry['status'] = 'error'
+            log_entry['message'] = f"News cycle failed: {result['error'][:150]}"
+        else:
+            log_entry['status'] = 'success'
+            log_entry['message'] = (f"News cycle: fetched {result['fetched']}, "
+                                    f"new {result['new_items']}, scored "
+                                    f"{result['scored']}, pushed "
+                                    f"{result['pushed_count']}")
+    except Exception as e:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry['status'] = 'error'
+        log_entry['message'] = f'News cycle failed: {str(e)[:200]}'
+        logger.exception("News cycle failed")
+
+    log_entry['timestamp'] = timestamp
+    _add_log_entry(log_entry)
+
+
+def _acquire_job(name: str) -> bool:
+    """Claim the global job slot. False if another job is in progress."""
+    global _busy_job
+    with _job_lock:
+        if _busy_job is not None:
+            return False
+        _busy_job = name
+        return True
+
+
+def _release_job(name: str):
+    """Release the global job slot if it belongs to this job."""
+    global _busy_job
+    with _job_lock:
+        if _busy_job == name:
+            _busy_job = None
+
+
+def _run_collection_job(headless: bool = True):
+    """Run one collection cycle, skipping if another job is in progress."""
+    if not _acquire_job('collection'):
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'info',
+            'message': 'Collection skipped: another job is running',
+        })
+        return
+    try:
+        _collect_tweets(headless=headless)
+    finally:
+        _release_job('collection')
+
+
+def _run_news_job():
+    """Run one news cycle, skipping if another job is in progress."""
+    if not _acquire_job('news'):
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'info',
+            'message': 'News cycle skipped: another job is running',
+        })
+        return
+    try:
+        _collect_news()
+    finally:
+        _release_job('news')
+
+
+def _run_tweet_scoring_job():
+    """AI-score unscored tweets, skipping if another job is in progress."""
+    if not _acquire_job('tweet-scoring'):
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'info',
+            'message': 'Tweet scoring skipped: another job is running',
+        })
+        return
+    try:
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'running',
+            'message': 'Starting tweet AI scoring',
+        })
+        total_scored, total_hidden = score_history()
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'success',
+            'message': (f'Tweet scoring: {total_scored} scored, '
+                        f'{total_hidden} hidden'),
+        })
+    except Exception as e:
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'error',
+            'message': f'Tweet scoring failed: {str(e)[:150]}',
+        })
+        logger.exception("Tweet scoring job failed")
+    finally:
+        _release_job('tweet-scoring')
+
+
+def _run_news_scoring_job():
+    """Re-score recent news items, skipping if another job is in progress."""
+    if not _acquire_job('news-scoring'):
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'info',
+            'message': 'News scoring skipped: another job is running',
+        })
+        return
+    try:
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'running',
+            'message': 'Starting news AI scoring',
+        })
+        result = rescore_news()
+        if result.get('error'):
+            _add_log_entry({
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'status': 'error',
+                'message': f"News scoring failed: {result['error'][:150]}",
+            })
+        else:
+            _add_log_entry({
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'status': 'success',
+                'message': (f"News scoring: {result['scored']} rescored, "
+                            f"{result['hidden']} hidden"),
+            })
+    except Exception as e:
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'error',
+            'message': f'News scoring failed: {str(e)[:150]}',
+        })
+        logger.exception("News scoring job failed")
+    finally:
+        _release_job('news-scoring')
+
+
+def _run_login_job():
+    """Run the auto-detect login flow, skipping if another job is in progress."""
+    if not _acquire_job('login'):
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'info',
+            'message': 'Login skipped: another job is running',
+        })
+        return
+    try:
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'running',
+            'message': 'Starting login flow (browser will open)',
+        })
+        success = asyncio.run(login_flow_auto())
+        _add_log_entry({
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'success' if success else 'error',
+            'message': 'Login completed successfully' if success
+                       else 'Login failed or timed out',
+        })
+    finally:
+        _release_job('login')
+
+
+def trigger_collection_now() -> Dict[str, Any]:
+    """Kick off a manual (visible-browser) collection cycle in the background."""
+    with _job_lock:
+        if _busy_job is not None:
+            return {'started': False, 'busy': _busy_job}
+    threading.Thread(target=_run_collection_job, kwargs={'headless': False},
+                     name='manual-collection', daemon=True).start()
+    return {'started': True}
+
+
+def trigger_news_now() -> Dict[str, Any]:
+    """Kick off a manual news cycle in the background."""
+    with _job_lock:
+        if _busy_job is not None:
+            return {'started': False, 'busy': _busy_job}
+    threading.Thread(target=_run_news_job, name='manual-news', daemon=True).start()
+    return {'started': True}
+
+
+def trigger_login() -> Dict[str, Any]:
+    """Kick off the auto-detect login flow in the background."""
+    with _job_lock:
+        if _busy_job is not None:
+            return {'started': False, 'busy': _busy_job}
+    threading.Thread(target=_run_login_job, name='manual-login', daemon=True).start()
+    return {'started': True}
+
+
+def trigger_tweet_scoring() -> Dict[str, Any]:
+    """Kick off AI scoring of unscored tweets in the background."""
+    with _job_lock:
+        if _busy_job is not None:
+            return {'started': False, 'busy': _busy_job}
+    threading.Thread(target=_run_tweet_scoring_job,
+                     name='manual-tweet-scoring', daemon=True).start()
+    return {'started': True}
+
+
+def trigger_news_scoring() -> Dict[str, Any]:
+    """Kick off re-scoring of recent news items in the background."""
+    with _job_lock:
+        if _busy_job is not None:
+            return {'started': False, 'busy': _busy_job}
+    threading.Thread(target=_run_news_scoring_job,
+                     name='manual-news-scoring', daemon=True).start()
+    return {'started': True}
+
+
 def _add_log_entry(entry: Dict[str, Any]):
-    """Add log entry to history and save to file"""
+    """Add log entry to history and save to file (thread-safe)"""
     global _log_history
-    _log_history.insert(0, entry)
-    if len(_log_history) > _max_log_entries:
-        _log_history = _log_history[:_max_log_entries]
-    _save_logs()
+    with _history_lock:
+        _log_history.insert(0, entry)
+        if len(_log_history) > _max_log_entries:
+            _log_history = _log_history[:_max_log_entries]
+        _save_logs()
 
 
 def _save_logs():
@@ -99,6 +337,48 @@ def _load_logs():
             _log_history = []
 
 
+def _check_existing_process() -> bool:
+    """Return True if another live process holds the scheduler PID lock."""
+    if not _pid_file.exists():
+        return False
+    try:
+        pid = int(_pid_file.read_text().strip())
+    except (ValueError, OSError):
+        return False
+    try:
+        os.kill(pid, 0)  # Signal 0 = existence check only
+        return True
+    except ProcessLookupError:
+        return False  # stale pid file, previous process is gone
+    except PermissionError:
+        return True  # exists but owned by someone else
+
+
+def _acquire_pid_lock() -> bool:
+    """Take the cross-process scheduler lock. False if another scheduler is live.
+
+    Note: is_running() only guards within this process; the PID file is what
+    stops a second app.py instance from starting its own scheduler thread.
+    """
+    if _check_existing_process():
+        return False
+    try:
+        _pid_file.write_text(str(os.getpid()))
+        return True
+    except OSError as e:
+        logger.error(f"Failed to write pid file {_pid_file}: {e}")
+        return False
+
+
+def _release_pid_lock():
+    """Remove the PID lock if it belongs to this process."""
+    try:
+        if _pid_file.exists() and _pid_file.read_text().strip() == str(os.getpid()):
+            _pid_file.unlink()
+    except OSError:
+        pass
+
+
 def _run_scheduler_loop():
     """Main scheduler loop running in background thread"""
     while not _stop_event.is_set():
@@ -113,15 +393,20 @@ def _run_scheduler_loop():
 def _setup_schedule(interval: int, unit: str):
     """Setup schedule based on interval and unit"""
     schedule.clear()
-    
+
     if unit == 'minutes':
-        schedule.every(interval).minutes.do(_collect_tweets)
+        schedule.every(interval).minutes.do(_run_collection_job)
     elif unit == 'hours':
-        schedule.every(interval).hours.do(_collect_tweets)
+        schedule.every(interval).hours.do(_run_collection_job)
     elif unit == 'days':
-        schedule.every(interval).days.do(_collect_tweets)
+        schedule.every(interval).days.do(_run_collection_job)
     else:
-        schedule.every().hour.do(_collect_tweets)  # default
+        schedule.every().hour.do(_run_collection_job)  # default
+
+    # News cycle job - must be registered here (after schedule.clear())
+    # or it would be wiped on every scheduler start/stop
+    if config.NEWS_SCHEDULE_ENABLED:
+        schedule.every(config.NEWS_CYCLE_INTERVAL_MINUTES).minutes.do(_run_news_job)
 
 
 def start_scheduler(interval: int = 1, unit: str = 'hours') -> bool:
@@ -136,10 +421,17 @@ def start_scheduler(interval: int = 1, unit: str = 'hours') -> bool:
         True if started successfully, False if already running
     """
     global _scheduler_thread, _current_config
-    
+
     if is_running():
         return False
-    
+
+    # Cross-process guard: refuse if another process (e.g. a second web
+    # instance) already owns the scheduler PID lock.
+    if not _acquire_pid_lock():
+        owner = _pid_file.read_text().strip() if _pid_file.exists() else 'unknown'
+        logger.warning("Scheduler already running in another process (PID %s) - refusing to start", owner)
+        return False
+
     _stop_event.clear()
     _setup_schedule(interval, unit)
 
@@ -188,6 +480,8 @@ def stop_scheduler() -> bool:
     _current_config['running'] = False
     _current_config['stopped_at'] = datetime.now().isoformat()
     _save_config()
+
+    _release_pid_lock()
     
     _add_log_entry({
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -216,6 +510,7 @@ def get_status() -> Dict[str, Any]:
         'running': is_running(),
         'config': _current_config,
         'next_run': next_run,
+        'busy_job': _busy_job,
         'log_history': _log_history[:10]  # Last 10 entries
     }
 
@@ -248,8 +543,10 @@ def auto_start_if_enabled():
     if cfg.get('running', False):
         interval = cfg.get('interval', 1)
         unit = cfg.get('unit', 'hours')
-        start_scheduler(interval, unit)
-        logger.info(f"Auto-started scheduler: every {interval} {unit}")
+        if start_scheduler(interval, unit):
+            logger.info(f"Auto-started scheduler: every {interval} {unit}")
+        else:
+            logger.warning("Scheduler auto-start refused (already running in this process or another)")
 
 
 # Load config and logs on module import

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新闻时间线 - Tweet Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">🗓 新闻时间线</h1>
+                        <p class="text-sm text-gray-500 mt-1">极其重要的新闻 · 按日期串联</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/tweets" class="text-sm font-medium text-blue-600 hover:text-blue-800">
+                        🐦 推文
+                    </a>
+                    <a href="/news" class="text-sm font-medium text-blue-600 hover:text-blue-800">
+                        📡 新闻雷达
+                    </a>
+                    <a href="/scheduler" class="text-sm font-medium text-blue-600 hover:text-blue-800">
+                        ⏰ 控制台
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Controls -->
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-3 flex items-center justify-center gap-4 flex-wrap">
+            <label class="text-sm text-gray-600">重要程度：</label>
+            <select id="min-score-filter" class="py-2 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <option value="90">≥ 90 分 · 顶级</option>
+                <option value="80" selected>≥ 80 分 · 极其重要</option>
+                <option value="75">≥ 75 分</option>
+                <option value="70">≥ 70 分 · 全部保留</option>
+            </select>
+            <span id="count-hint" class="text-xs text-gray-400"></span>
+        </div>
+    </div>
+
+    <!-- Timeline: center line, two cards per row -->
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+        <div id="timeline-container" class="relative">
+            <!-- Center line -->
+            <div class="absolute left-1/2 top-0 bottom-0 w-0.5 bg-blue-200 -translate-x-1/2"></div>
+            <div class="relative">
+                <div class="text-center py-12">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
+                    <p class="mt-4 text-gray-500">加载中...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
+</body>
+</html>

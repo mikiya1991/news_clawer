@@ -11,6 +11,9 @@
 - 🔄 **会话持久化**: 首次登录后自动保存浏览器状态，后续运行无需重新登录
 - 📝 **详细日志**: 完整的执行日志、错误跟踪和调试截图
 - 🛡️ **错误恢复**: 自动处理重试、异常和网络问题
+- 🤖 **AI 自动筛选**: DeepSeek 判断推文价值，垃圾推文不入库（fail-open 不丢数据）
+- 🀄 **AI 中文摘要**: 英文推文自动生成一行中文摘要
+- 📡 **新闻雷达**: RSS + X 推文 → DeepSeek 评分 → 微信推送（Server酱/PushPlus）
 
 ## 项目结构
 
@@ -21,8 +24,18 @@ new_clawer/
 ├── scraper.py              # 推文数据抓取逻辑
 ├── database.py             # SQLite 数据库操作
 ├── config.py               # 配置文件
+├── logger.py               # 统一日志配置（日志轮转）
 ├── requirements.txt        # Python 依赖
 ├── scheduler.py           # Python schedule 库定时调度器（推荐）
+├── scheduler_module.py    # 程序化调度器（Web 面板控制，随 app.py 自动启动）
+├── tweet_filter.py        # AI 推文价值筛选/评分（DeepSeek 批量）
+├── tweet_summarizer.py    # 英文推文 AI 中文摘要
+├── news_pipeline.py       # 新闻雷达流水线（RSS+X → 评分 → 推送）
+├── news_fetcher.py        # RSS 订阅与 X 候选推文抓取
+├── news_scorer.py         # DeepSeek 新闻评分
+├── news_db.py             # 新闻数据存储（news_items 表）
+├── news_pusher.py         # 微信推送（Server酱/PushPlus）
+├── .env.example           # 环境变量模板（API key、推送、RSS）
 ├── cron_job.sh            # 传统 cron 设置脚本（已弃用）
 ├── .gitignore             # Git 忽略文件
 ├── README.md              # 本文件
@@ -303,6 +316,62 @@ done
 | systemd | Linux | 系统级、可靠 | 仅 Linux |
 | while+sleep | 通用 | 最简单 | 无持久化、重启需手动 |
 
+## AI 自动筛选
+
+推文从采集到推送共经过 **三层 AI 筛选**（DeepSeek），触发时机各不相同：
+
+### 环境准备
+
+```bash
+cp .env.example .env    # 填入 DEEPSEEK_API_KEY（筛选必需）
+```
+
+`.env` 中还可配置：`PUSH_PROVIDER`/`PUSH_TOKEN`（微信推送）、`RSS_FEEDS`（新闻源）、`DEEPSEEK_MODEL` 等。
+
+### 1. 采集时过滤（写入数据库之前）
+
+每次采集循环（`--collect` 或调度器定时采集）抓到新推文后、**写入 `tweets.db` 之前**，`tweet_filter.py` 的 `filter_tweets()` 用 DeepSeek 批量判断每条推文是否值得收集：
+
+- **保留**：新闻、行业资讯、数据、公告、独到观点、深度分析、有价值分享
+- **丢弃**：纯闲聊、日常寒暄、无信息量互动、无补充的纯转发、广告抽奖
+
+特点：
+
+- 已被判定丢弃的推文会记录在库，**永不重复判断**（再次抓到直接跳过）
+- 每轮最多判断 `AI_FILTER_MAX_TWEETS=50` 条，超出部分不过滤直接入库
+- **Fail-open**：DeepSeek 失败或未配置 key 时全部入库，不丢数据
+- 开关：环境变量 `AI_FILTER_ENABLED`（默认开启）
+
+过滤之后，英文推文还会经 `tweet_summarizer.py` 生成一行中文摘要（`ai_summary` 字段），仅作标注、不参与筛选。
+
+### 2. 历史推文打分隐藏（手动触发）
+
+```bash
+python3 main.py --score-history [N]   # 不加 N = 全部未评分的推文
+```
+
+对库中未评分的推文打分（0-100），低于 `TWEET_STORE_THRESHOLD=60` 的在 Web 面板中隐藏（`kept=0`，不删除）。
+
+> 注意：此步骤目前**仅支持手动执行**，调度器不会自动运行。
+
+### 3. 新闻雷达评分筛选（每小时自动）
+
+调度器每小时自动运行新闻流水线（`news_pipeline.py`，也可手动 `python3 main.py --collect-news`）：
+
+1. 候选 = RSS 订阅 + 库中近 24 小时、点赞 ≥ 100 的 X 推文
+2. DeepSeek 评分后，低于 `NEWS_STORE_THRESHOLD=70` 的入库但标记过滤（`kept=0`）
+3. 高于 `NEWS_SCORE_THRESHOLD=70` 的 top 5 推送到微信（Server酱/PushPlus）
+
+这里的 X 候选是第 1 层过滤后已经入库的推文，因此是第二次筛选。评分结果可在 `http://localhost:5001/news` 查看。
+
+### 筛选总览
+
+| 筛选 | 时机 | 触发方式 | 效果 |
+|------|------|---------|------|
+| AI 过滤 `filter_tweets` | 每次采集时 | 调度器自动（默认每小时） | 垃圾推文不入库 |
+| AI 打分 `score_history` | 随时 | 仅手动 CLI | 低分历史推文在面板隐藏 |
+| 新闻评分 | 每小时 | 调度器自动 | 高分新闻入库 + 推微信 |
+
 ## 数据库
 
 ### 表结构
@@ -415,6 +484,26 @@ DATABASE_CHECK_SAME_THREAD = False
 
 # 日志
 LOG_LEVEL = "INFO"             # 日志级别（DEBUG/INFO/WARNING/ERROR）
+```
+
+AI 筛选与新闻雷达相关（API key 等放 `.env`，阈值改 `config.py`）：
+
+```python
+# AI 采集时过滤（开关为 .env 中的 AI_FILTER_ENABLED）
+AI_FILTER_MAX_TWEETS = 50      # 每轮最多判断的推文数
+TWEET_STORE_THRESHOLD = 60     # 历史打分低于此值在面板隐藏
+
+# AI 英文摘要
+AI_SUMMARY_ENABLED = True      # 环境变量 AI_SUMMARY_ENABLED 控制
+AI_SUMMARY_MAX_TWEETS = 50     # 每批最多摘要的推文数
+
+# 新闻雷达
+NEWS_X_LOOKBACK_HOURS = 24     # X 候选时间窗口（小时）
+NEWS_X_MIN_LIKES = 100         # X 候选最小点赞数
+NEWS_STORE_THRESHOLD = 70      # 低于此分的新闻标记为过滤
+NEWS_SCORE_THRESHOLD = 70      # 高于此分才推送微信
+NEWS_PUSH_TOP_N = 5            # 每次推送最多条数
+NEWS_CYCLE_INTERVAL_MINUTES = 60  # 新闻循环频率
 ```
 
 ## 故障排除

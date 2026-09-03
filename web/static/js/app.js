@@ -134,7 +134,7 @@ function renderTweets(tweets) {
     
     if (tweets.length === 0) {
         container.innerHTML = `
-            <div class="text-center py-12">
+            <div class="md:col-span-2 xl:col-span-3 text-center py-12">
                 <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
@@ -143,57 +143,38 @@ function renderTweets(tweets) {
         `;
         return;
     }
-    
-    container.innerHTML = tweets.map(tweet => `
-        <div class="tweet-card bg-white rounded-lg shadow-sm border border-gray-200 p-4 md:p-6">
-            <div class="flex items-start space-x-3">
-                <div class="flex-shrink-0">
-                    <div class="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-lg">
-                        ${tweet.username.charAt(0).toUpperCase()}
-                    </div>
+
+    container.innerHTML = tweets.map(tweet => {
+        const band = scoreBand(tweet.ai_score || 0);
+        return `
+        <div class="tweet-card ${band.card} border border-gray-200 border-l-4 rounded-lg p-3 hover:shadow-md transition-shadow flex flex-col">
+            <div class="flex items-center gap-2">
+                <div class="h-7 w-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                    ${tweet.username.charAt(0).toUpperCase()}
                 </div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center space-x-2">
-                            <span class="font-semibold text-gray-900">@${tweet.username}</span>
-                            <span class="text-gray-500 text-sm">${formatRelativeTime(tweet.collected_at)}</span>
-                        </div>
-                        ${tweet.url ? `
-                            <a href="${tweet.url}" target="_blank" class="text-blue-500 hover:text-blue-600 text-sm">
-                                查看原文
-                                <svg class="inline h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                </svg>
-                            </a>
-                        ` : ''}
-                    </div>
-                    <div class="mt-2 tweet-content text-gray-800 text-base leading-relaxed">
-                        ${escapeHtml(tweet.text)}
-                    </div>
-                    <div class="mt-3 flex items-center space-x-6 text-sm text-gray-500">
-                        <div class="flex items-center space-x-1">
-                            <svg class="h-4 w-4 text-pink-500" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                            </svg>
-                            <span>${formatNumber(tweet.like_count)}</span>
-                        </div>
-                        <div class="flex items-center space-x-1">
-                            <svg class="h-4 w-4 text-green-500" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M23.77 15.67c-.07-.26-.27-.43-.53-.43h-3.13v-9.3c0-.35-.28-.63-.63-.63h-8.8V1.77c0-.26-.17-.46-.43-.53-.26-.07-.53.03-.69.23l-10 12.5c-.13.17-.15.39-.05.59.1.19.29.31.5.31h3.13v9.3c0 .35.28.63.63.63h8.8v3.57c0 .26.17.46.43.53.08.02.16.03.24.03.19 0 .37-.09.46-.26l10-12.5c.13-.17.15-.39.05-.59z"/>
-                            </svg>
-                            <span>${formatNumber(tweet.retweet_count)}</span>
-                        </div>
-                        <div class="flex items-center space-x-1">
-                            <svg class="h-4 w-4 text-blue-500" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
-                            </svg>
-                            <span>${formatNumber(tweet.view_count)}</span>
-                        </div>
-                    </div>
+                <span class="font-medium text-gray-900 text-sm truncate">@${tweet.username}</span>
+                <div class="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                    ${tweet.ai_score > 0 ? `<span class="inline-flex items-center justify-center h-5 px-1.5 rounded font-bold text-[11px] ${band.badge}">${tweet.ai_score}</span>` : ''}
+                    <span class="text-gray-400 text-xs whitespace-nowrap">${formatRelativeTime(tweet.collected_at)}</span>
                 </div>
             </div>
+            <div class="mt-2 tweet-content text-gray-800 text-sm leading-relaxed line-clamp-3">
+                ${escapeHtml(tweet.text)}
+            </div>
+            ${tweet.ai_summary ? `
+            <div class="mt-1.5 text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded p-1.5 leading-relaxed line-clamp-2">
+                <span title="AI 注释">🤖</span> ${escapeHtml(tweet.ai_summary)}
+            </div>
+            ` : ''}
+            <div class="mt-2 pt-2 border-t border-gray-100 flex items-center gap-3 text-xs text-gray-500">
+                <span class="flex items-center gap-0.5 text-pink-500">♥ <span class="text-gray-500">${formatNumber(tweet.like_count)}</span></span>
+                <span class="flex items-center gap-0.5 text-green-600">↻ <span class="text-gray-500">${formatNumber(tweet.retweet_count)}</span></span>
+                <span class="flex items-center gap-0.5 text-blue-500">👁 <span class="text-gray-500">${formatNumber(tweet.view_count)}</span></span>
+                ${tweet.url ? `<a href="${tweet.url}" target="_blank" class="ml-auto text-blue-500 hover:text-blue-600 whitespace-nowrap">原文</a>` : ''}
+            </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 // Escape HTML to prevent XSS
@@ -203,11 +184,22 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Score-based card color scheme (green = high priority, red = low)
+function scoreBand(score) {
+    if (score >= 90) return { card: 'bg-emerald-50 border-l-emerald-500', badge: 'bg-emerald-600 text-white' };
+    if (score >= 85) return { card: 'bg-green-50 border-l-green-500', badge: 'bg-green-600 text-white' };
+    if (score >= 80) return { card: 'bg-teal-50 border-l-teal-400', badge: 'bg-teal-500 text-white' };
+    if (score >= 75) return { card: 'bg-cyan-50 border-l-cyan-400', badge: 'bg-cyan-500 text-white' };
+    if (score >= 70) return { card: 'bg-blue-50 border-l-blue-400', badge: 'bg-blue-500 text-white' };
+    if (score >= 60) return { card: 'bg-amber-50 border-l-amber-400', badge: 'bg-amber-500 text-white' };
+    return { card: 'bg-rose-50 border-l-rose-400', badge: 'bg-rose-500 text-white' };
+}
+
 // Show loading state
 function showLoading() {
     const container = document.getElementById('tweets-container');
     container.innerHTML = `
-        <div class="text-center py-12">
+        <div class="md:col-span-2 xl:col-span-3 text-center py-12">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
             <p class="mt-4 text-gray-500">加载中...</p>
         </div>
@@ -218,7 +210,7 @@ function showLoading() {
 function showError(message) {
     const container = document.getElementById('tweets-container');
     container.innerHTML = `
-        <div class="text-center py-12">
+        <div class="md:col-span-2 xl:col-span-3 text-center py-12">
             <svg class="mx-auto h-12 w-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
