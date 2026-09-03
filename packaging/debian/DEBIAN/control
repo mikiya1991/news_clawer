@@ -1,0 +1,15 @@
+Package: xclawer
+Version: 1.0.0
+Section: web
+Priority: optional
+Architecture: amd64
+Depends: python3 (>= 3.8)
+Maintainer: mikiya
+Description: X.com tweet scraper with news radar and web console
+ Collects tweets from X.com via Playwright, filters and scores them with
+ AI (DeepSeek), runs an RSS + X news radar with WeChat push, and serves
+ a web console on port 5001.
+ .
+ The virtualenv is bundled in the package. Data (database, browser
+ session, logs, scheduler state) lives in /var/lib/xclawer;
+ configuration lives in /etc/xclawer/.env.

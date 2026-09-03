@@ -11,12 +11,19 @@ PROJECT_ROOT = Path(__file__).parent
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
+# Runtime data root: all writable state (database, browser profile, logs,
+# scheduler state) lives under this directory. Defaults to the project
+# directory; set XCLAWER_DATA_DIR to relocate, e.g. /var/lib/xclawer when
+# installed from the .deb package.
+DATA_ROOT = Path(os.getenv('XCLAWER_DATA_DIR', str(PROJECT_ROOT)))
+DATA_ROOT.mkdir(parents=True, exist_ok=True)
+
 # Database
-DATABASE_PATH = PROJECT_ROOT / "tweets.db"
+DATABASE_PATH = DATA_ROOT / "tweets.db"
 DATABASE_CHECK_SAME_THREAD = False
 
 # Playwright
-BROWSER_USER_DATA_DIR = PROJECT_ROOT / "browser_state"
+BROWSER_USER_DATA_DIR = DATA_ROOT / "browser_state"
 HEADLESS_MODE = False  # Set to True for background operation
 BROWSER_TIMEOUT = 30000  # milliseconds
 
@@ -28,7 +35,7 @@ MAX_SCROLL_ATTEMPTS = 5  # Maximum number of scroll attempts per session
 TWEET_EXTRACTION_TIMEOUT = 5000  # milliseconds
 
 # Logging
-LOG_DIR = PROJECT_ROOT / "logs"
+LOG_DIR = DATA_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "scraper.log"
 LOG_LEVEL = "INFO"
@@ -48,7 +55,7 @@ RETWEET_COUNT_SELECTOR = '[data-testid="retweet"] span'
 
 # Debugging
 DEBUG_SCREENSHOTS = True
-SCREENSHOTS_DIR = PROJECT_ROOT / "debug_screenshots"
+SCREENSHOTS_DIR = DATA_ROOT / "debug_screenshots"
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
 
 # News Radar Settings (RSS + X tweets -> DeepSeek scoring -> WeChat push)

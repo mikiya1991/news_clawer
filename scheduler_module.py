@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 # Global state
 _scheduler_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
-_config_file = Path(__file__).parent / 'scheduler_config.json'
-_pid_file = Path(__file__).parent / 'scheduler.pid'
-_log_file = Path(__file__).parent / 'logs' / 'scheduler_history.json'
+_config_file = config.DATA_ROOT / 'scheduler_config.json'
+_pid_file = config.DATA_ROOT / 'scheduler.pid'
+_log_file = config.LOG_DIR / 'scheduler_history.json'
 _log_history: list = []
 _max_log_entries = 100
 _current_config: Dict[str, Any] = {

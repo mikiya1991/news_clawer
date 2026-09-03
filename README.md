@@ -372,6 +372,58 @@ python3 main.py --score-history [N]   # 不加 N = 全部未评分的推文
 | AI 打分 `score_history` | 随时 | 仅手动 CLI | 低分历史推文在面板隐藏 |
 | 新闻评分 | 每小时 | 调度器自动 | 高分新闻入库 + 推微信 |
 
+## Ubuntu 安装包（.deb）
+
+> 完整的发布、升级、运维流程见 [ubuntu-release.md](ubuntu-release.md)。
+
+### 构建（在 Ubuntu 上执行）
+
+```bash
+./build_deb.sh 1.0.0       # 生成 dist/xclawer_1.0.0_amd64.deb
+```
+
+构建脚本会把项目文件和打好依赖的 venv 一并打进包（约 200MB）。
+因为 venv 是 Linux 二进制，构建必须在 Ubuntu 环境进行（包内 venv 的目标系统 Python 版本与构建系统一致）。
+
+**没有 Ubuntu 机器？** 用 Docker 在任意平台构建（需安装 Docker Desktop）：
+
+```bash
+./build_deb_docker.sh 1.0.0   # 在 ubuntu:22.04 容器内构建；XCLAWER_BUILD_IMAGE 可换镜像版本
+```
+
+### 安装
+
+```bash
+sudo dpkg -i dist/xclawer_1.0.0_amd64.deb
+# 依赖缺失时: sudo apt-get install -f
+```
+
+安装时只需联网下载 Chromium（约 150MB，含 apt 系统依赖），之后：
+
+1. 编辑 `/etc/xclawer/.env`，填入 `DEEPSEEK_API_KEY`（及推送/RSS 配置）
+2. `sudo systemctl restart xclawer`
+3. 浏览器访问 `http://<服务器IP>:5001`
+
+安装行为：
+
+- **程序** → `/usr/lib/xclawer`（dpkg 管理，升级用 `sudo dpkg -i 新版.deb`，venv 随包更新）
+- **数据** → `/var/lib/xclawer`（tweets.db、browser_state、ms-playwright、logs、调度状态；升级不丢）
+- **配置** → `/etc/xclawer/.env`（升级不覆盖）
+- **服务** → systemd `xclawer`：开机自启、崩溃自动重启（`systemctl status xclawer` 查看），以专用用户 `_xclawer` 运行
+
+### 卸载
+
+```bash
+sudo apt remove xclawer        # 保留数据
+sudo apt purge xclawer         # 连同配置模板
+sudo rm -rf /var/lib/xclawer   # 彻底删除数据
+```
+
+### 注意
+
+- 采集、新闻、AI 评分全部可用；登录 X、手动抓取会弹出可见浏览器窗口（需桌面环境）
+- 打包版服务以 `XCLAWER_DEBUG=0` 运行（关闭 Werkzeug debugger）；本地开发保持 debug 模式
+
 ## 数据库
 
 ### 表结构

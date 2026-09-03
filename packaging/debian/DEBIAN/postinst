@@ -1,0 +1,50 @@
+#!/bin/bash
+# Post-install: service user + data dir + Chromium + systemd service.
+# The virtualenv is bundled in the package; only Chromium is downloaded here
+# (into the data dir, so it survives package upgrades).
+set -e
+
+APP_DIR=/usr/lib/xclawer
+DATA_DIR=/var/lib/xclawer
+SERVICE_USER=_xclawer
+BROWSER_DIR="$DATA_DIR/ms-playwright"
+
+echo "==> Creating service user and data directory..."
+if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+fi
+mkdir -p "$DATA_DIR"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+
+echo "==> Setting up configuration..."
+mkdir -p /etc/xclawer
+if [ ! -f /etc/xclawer/.env ]; then
+    cp "$APP_DIR/.env.example" /etc/xclawer/.env
+fi
+chmod 640 /etc/xclawer/.env
+chown "$SERVICE_USER:$SERVICE_USER" /etc/xclawer/.env
+ln -sfn /etc/xclawer/.env "$APP_DIR/.env"
+
+echo "==> Installing Playwright Chromium (downloads ~150MB; apt deps need root)..."
+PLAYWRIGHT_BROWSERS_PATH="$BROWSER_DIR" \
+    "$APP_DIR/venv/bin/playwright" install --with-deps chromium
+chown -R "$SERVICE_USER:$SERVICE_USER" "$BROWSER_DIR"
+
+# Seed scheduler state: 60-minute collection, auto-start on boot
+if [ ! -f "$DATA_DIR/scheduler_config.json" ]; then
+    printf '{"interval": 60, "unit": "minutes", "running": true}\n' \
+        > "$DATA_DIR/scheduler_config.json"
+    chown "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR/scheduler_config.json"
+fi
+
+echo "==> Enabling systemd service..."
+systemctl daemon-reload
+systemctl enable xclawer.service >/dev/null 2>&1 || true
+systemctl restart xclawer.service || true
+
+echo ""
+echo "xclawer installed."
+echo "  1. Edit /etc/xclawer/.env and fill in DEEPSEEK_API_KEY (and push/RSS options)"
+echo "  2. sudo systemctl restart xclawer"
+echo "  3. Console: http://<server-ip>:5001"
+echo ""

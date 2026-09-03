@@ -2,6 +2,7 @@
 Flask web application for tweet dashboard with scheduler control
 """
 import json
+import os
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -421,7 +422,7 @@ def scheduler_overview():
         # News cycle history from scheduler_history.json.
         # Duplicate entries (same timestamp + message) are collapsed.
         news_runs = []
-        hist_file = Path(__file__).parent.parent / 'logs' / 'scheduler_history.json'
+        hist_file = config.LOG_DIR / 'scheduler_history.json'
         if hist_file.exists():
             with open(hist_file, 'r', encoding='utf-8') as f:
                 entries = json.load(f)
@@ -469,7 +470,7 @@ def scheduler_logs():
         if lines < 1 or lines > 1000:
             lines = 100
 
-        log_file = Path(__file__).parent.parent / 'logs' / 'scraper.log'
+        log_file = config.LOG_DIR / 'scraper.log'
         if not log_file.exists():
             return jsonify({'success': True, 'logs': []})
 
@@ -681,4 +682,9 @@ if __name__ == '__main__':
     # use_reloader=False: the Werkzeug debug reloader forks a child process,
     # which re-runs module-level code (auto_start_if_enabled) and doubles the
     # scheduler. The scheduler PID lock in scheduler_module guards this too.
-    app.run(debug=True, use_reloader=False, host='0.0.0.0', port=5001)
+    #
+    # Debug mode is on by default for local development. The packaged
+    # systemd service sets XCLAWER_DEBUG=0 (the Werkzeug debugger must not
+    # be exposed on a networked host).
+    debug = os.getenv('XCLAWER_DEBUG', '1') == '1'
+    app.run(debug=debug, use_reloader=False, host='0.0.0.0', port=5001)

@@ -1,0 +1,6 @@
+#!/bin/bash
+# Pre-removal: stop and disable the service.
+# Data in /var/lib/xclawer and config in /etc/xclawer are kept on remove;
+# use `apt purge` plus manual deletion to wipe them.
+systemctl disable --now xclawer.service >/dev/null 2>&1 || true
+exit 0
