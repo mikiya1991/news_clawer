@@ -32,6 +32,17 @@ const elements = {
     unscoredCount: document.getElementById('unscored-count'),
     newsRunsContainer: document.getElementById('news-runs-container'),
     newsItemsContainer: document.getElementById('news-items-container'),
+    envFilePath: document.getElementById('env-file-path'),
+    apiKeyInput: document.getElementById('api-key-input'),
+    apiKeyToggle: document.getElementById('api-key-toggle'),
+    baseUrlInput: document.getElementById('base-url-input'),
+    modelInput: document.getElementById('model-input'),
+    pushProviderSelect: document.getElementById('push-provider-select'),
+    pushTokenInput: document.getElementById('push-token-input'),
+    rssFeedsInput: document.getElementById('rss-feeds-input'),
+    aiFilterToggle: document.getElementById('ai-filter-toggle'),
+    aiSummaryToggle: document.getElementById('ai-summary-toggle'),
+    saveConfigBtn: document.getElementById('save-config-btn'),
     toast: document.getElementById('toast'),
     toastMessage: document.getElementById('toast-message')
 };
@@ -163,6 +174,61 @@ function renderManualButtons(busyJob) {
             ? TOGGLE_BUTTON_ICONS.spinner + '<span>执行中...</span>'
             : label;
     });
+}
+
+// Fetch and render the .env configuration form
+async function fetchConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || '加载失败');
+
+        const v = data.values || {};
+        elements.envFilePath.textContent = data.env_file || '.env';
+        elements.apiKeyInput.value = v.DEEPSEEK_API_KEY || '';
+        elements.baseUrlInput.value = v.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+        elements.modelInput.value = v.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+        elements.pushProviderSelect.value = v.PUSH_PROVIDER || '';
+        elements.pushTokenInput.value = v.PUSH_TOKEN || '';
+        elements.rssFeedsInput.value = v.RSS_FEEDS || '';
+        elements.aiFilterToggle.checked = !!v.AI_FILTER_ENABLED;
+        elements.aiSummaryToggle.checked = !!v.AI_SUMMARY_ENABLED;
+    } catch (error) {
+        console.error('Error fetching config:', error);
+    }
+}
+
+// Save the configuration form
+async function saveConfig() {
+    elements.saveConfigBtn.disabled = true;
+    try {
+        const response = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                DEEPSEEK_API_KEY: elements.apiKeyInput.value,
+                DEEPSEEK_BASE_URL: elements.baseUrlInput.value,
+                DEEPSEEK_MODEL: elements.modelInput.value,
+                PUSH_PROVIDER: elements.pushProviderSelect.value,
+                PUSH_TOKEN: elements.pushTokenInput.value,
+                RSS_FEEDS: elements.rssFeedsInput.value,
+                AI_FILTER_ENABLED: elements.aiFilterToggle.checked,
+                AI_SUMMARY_ENABLED: elements.aiSummaryToggle.checked,
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast(data.message || '配置已保存');
+            await fetchConfig();
+        } else {
+            showToast(data.message || '保存失败', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving config:', error);
+        showToast('保存失败: 网络错误', 'error');
+    } finally {
+        elements.saveConfigBtn.disabled = false;
+    }
 }
 
 // Fetch overview data: collection results, unscored tweets, news cycle
@@ -417,6 +483,14 @@ function setupEventListeners() {
         btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
 
+    // Config form
+    elements.saveConfigBtn.addEventListener('click', saveConfig);
+    elements.apiKeyToggle.addEventListener('click', () => {
+        const isPassword = elements.apiKeyInput.type === 'password';
+        elements.apiKeyInput.type = isPassword ? 'text' : 'password';
+        elements.apiKeyToggle.textContent = isPassword ? '隐藏' : '显示';
+    });
+
     // Manual actions
     elements.loginBtn.addEventListener('click', () => {
         if (!confirm('将打开一个可见的浏览器窗口，请在窗口中完成 X 登录（自动检测，最长等待 5 分钟）。继续？')) return;
@@ -464,6 +538,7 @@ function init() {
     setupEventListeners();
     fetchStatus();
     fetchOverview();
+    fetchConfig();
 
     // Refresh status every 10 seconds
     state.refreshInterval = setInterval(fetchStatus, 10000);

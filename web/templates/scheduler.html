@@ -55,6 +55,9 @@
                     <button type="button" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50" data-tab="news">
                         📡 抓取新闻记录
                     </button>
+                    <button type="button" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50" data-tab="config">
+                        ⚙️ 系统配置
+                    </button>
                 </nav>
             </aside>
 
@@ -189,6 +192,96 @@
 
                         <h3 class="text-sm font-semibold text-gray-900 mt-6 mb-2">最近评分</h3>
                         <div id="news-items-container" class="text-sm text-gray-500">加载中...</div>
+                    </div>
+                </section>
+
+                <!-- Tab 4: System Config -->
+                <section id="tab-config" class="tab-panel hidden">
+                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 max-w-xl">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                            <svg class="h-5 w-5 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            </svg>
+                            系统配置
+                        </h2>
+                        <p class="text-xs text-gray-400 mb-4">
+                            保存在 <code id="env-file-path" class="text-xs">.env</code>，保存后立即生效（无需重启）
+                        </p>
+
+                        <form id="config-form" class="space-y-4">
+                            <!-- DeepSeek -->
+                            <div class="pt-2 border-t border-gray-100">
+                                <div class="text-sm font-semibold text-gray-700 mb-3">DeepSeek AI</div>
+                                <div class="space-y-3">
+                                    <div>
+                                        <label class="block text-sm text-gray-600 mb-1">API Key</label>
+                                        <div class="flex space-x-2">
+                                            <input type="password" id="api-key-input" placeholder="sk-..."
+                                                   class="flex-1 py-2 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                                            <button type="button" id="api-key-toggle" class="px-3 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">显示</button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-600 mb-1">Base URL</label>
+                                        <input type="text" id="base-url-input"
+                                               class="w-full py-2 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-600 mb-1">Model</label>
+                                        <input type="text" id="model-input"
+                                               class="w-full py-2 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- WeChat Push -->
+                            <div class="pt-2 border-t border-gray-100">
+                                <div class="text-sm font-semibold text-gray-700 mb-3">微信推送</div>
+                                <div class="space-y-3">
+                                    <div>
+                                        <label class="block text-sm text-gray-600 mb-1">推送渠道</label>
+                                        <select id="push-provider-select"
+                                                class="w-full py-2 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                                            <option value="">关闭</option>
+                                            <option value="serverchan">Server酱</option>
+                                            <option value="pushplus">PushPlus</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-600 mb-1">Token / SendKey</label>
+                                        <input type="password" id="push-token-input"
+                                               class="w-full py-2 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- RSS -->
+                            <div class="pt-2 border-t border-gray-100">
+                                <div class="text-sm font-semibold text-gray-700 mb-3">RSS 订阅源</div>
+                                <textarea id="rss-feeds-input" rows="3"
+                                          placeholder="多个源用英文逗号分隔"
+                                          class="w-full py-2 px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"></textarea>
+                            </div>
+
+                            <!-- AI toggles -->
+                            <div class="pt-2 border-t border-gray-100">
+                                <div class="text-sm font-semibold text-gray-700 mb-3">AI 功能开关</div>
+                                <label class="flex items-center mb-2">
+                                    <input type="checkbox" id="ai-filter-toggle" class="mr-2">
+                                    <span class="text-sm text-gray-600">采集时 AI 过滤（垃圾推文不入库）</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="ai-summary-toggle" class="mr-2">
+                                    <span class="text-sm text-gray-600">英文推文自动中文摘要</span>
+                                </label>
+                            </div>
+
+                            <button type="button" id="save-config-btn"
+                                    class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                                保存配置
+                            </button>
+                        </form>
                     </div>
                 </section>
             </div>

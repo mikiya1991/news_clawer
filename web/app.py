@@ -236,6 +236,131 @@ def scheduler_page():
     return render_template('scheduler.html')
 
 
+# Configuration Routes (.env management)
+# On the .deb install this path is a symlink to /etc/xclawer/.env, so writes
+# go through to the config directory.
+ENV_FILE = Path(__file__).parent.parent / '.env'
+
+
+def _parse_env_file() -> dict:
+    """Read KEY=VALUE pairs from .env (comments and blank lines skipped)"""
+    values = {}
+    if ENV_FILE.exists():
+        with open(ENV_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, _, value = line.partition('=')
+                values[key.strip()] = value.strip()
+    return values
+
+
+def _update_env_file(updates: dict):
+    """Update .env in place: replace existing KEY= lines, append missing keys"""
+    lines = ENV_FILE.read_text(encoding='utf-8').splitlines() \
+        if ENV_FILE.exists() else []
+    seen = set()
+    out = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#') and '=' in stripped:
+            key = stripped.split('=', 1)[0].strip()
+            if key in updates:
+                out.append(f'{key}={updates[key]}')
+                seen.add(key)
+                continue
+        out.append(line)
+    for key, value in updates.items():
+        if key not in seen:
+            out.append(f'{key}={value}')
+    ENV_FILE.write_text('\n'.join(out) + '\n', encoding='utf-8')
+
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Current effective configuration values"""
+    try:
+        return jsonify({
+            'success': True,
+            'env_file': str(ENV_FILE),
+            'values': {
+                'DEEPSEEK_API_KEY': config.DEEPSEEK_API_KEY,
+                'DEEPSEEK_BASE_URL': config.DEEPSEEK_BASE_URL,
+                'DEEPSEEK_MODEL': config.DEEPSEEK_MODEL,
+                'PUSH_PROVIDER': config.PUSH_PROVIDER,
+                'PUSH_TOKEN': config.PUSH_TOKEN,
+                'RSS_FEEDS': ','.join(config.RSS_FEEDS),
+                'AI_FILTER_ENABLED': config.AI_FILTER_ENABLED,
+                'AI_SUMMARY_ENABLED': config.AI_SUMMARY_ENABLED,
+            },
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/config', methods=['POST'])
+def save_config():
+    """Update .env and apply the values to the running process immediately"""
+    try:
+        data = request.get_json() or {}
+        updates = {}
+
+        # API key / token: an empty field keeps the current value
+        api_key = str(data.get('DEEPSEEK_API_KEY', '')).strip()
+        if api_key:
+            updates['DEEPSEEK_API_KEY'] = api_key
+        push_token = str(data.get('PUSH_TOKEN', '')).strip()
+        if push_token:
+            updates['PUSH_TOKEN'] = push_token
+
+        base_url = str(data.get('DEEPSEEK_BASE_URL', '')).strip()
+        if base_url:
+            updates['DEEPSEEK_BASE_URL'] = base_url
+
+        model = str(data.get('DEEPSEEK_MODEL', '')).strip()
+        if model:
+            updates['DEEPSEEK_MODEL'] = model
+
+        push_provider = str(data.get('PUSH_PROVIDER', '')).strip()
+        if push_provider in ('', 'serverchan', 'pushplus'):
+            updates['PUSH_PROVIDER'] = push_provider
+
+        updates['RSS_FEEDS'] = str(data.get('RSS_FEEDS', '')).strip()
+
+        for toggle in ('AI_FILTER_ENABLED', 'AI_SUMMARY_ENABLED'):
+            updates[toggle] = '1' if data.get(toggle) else '0'
+
+        _update_env_file(updates)
+
+        # Apply to the running process so changes take effect immediately
+        os.environ.update(updates)
+        config.DEEPSEEK_API_KEY = updates.get(
+            'DEEPSEEK_API_KEY', config.DEEPSEEK_API_KEY)
+        config.DEEPSEEK_BASE_URL = updates.get(
+            'DEEPSEEK_BASE_URL', config.DEEPSEEK_BASE_URL)
+        config.DEEPSEEK_MODEL = updates.get(
+            'DEEPSEEK_MODEL', config.DEEPSEEK_MODEL)
+        config.PUSH_PROVIDER = updates.get(
+            'PUSH_PROVIDER', config.PUSH_PROVIDER)
+        config.PUSH_TOKEN = updates.get('PUSH_TOKEN', config.PUSH_TOKEN)
+        config.RSS_FEEDS = [u.strip() for u in updates['RSS_FEEDS'].split(',')
+                            if u.strip()]
+        config.AI_FILTER_ENABLED = updates['AI_FILTER_ENABLED'] == '1'
+        config.AI_SUMMARY_ENABLED = updates['AI_SUMMARY_ENABLED'] == '1'
+
+        return jsonify({
+            'success': True,
+            'message': '配置已保存并立即生效',
+            'env_file': str(ENV_FILE),
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'保存失败: {str(e)}'
+        }), 500
+
+
 @app.route('/api/scheduler/status')
 def scheduler_status():
     """Get scheduler status"""
