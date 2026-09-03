@@ -3,7 +3,13 @@ Version: 1.0.0
 Section: web
 Priority: optional
 Architecture: amd64
-Depends: python3 (>= 3.8)
+Depends: python3 (>= 3.8),
+ libasound2, libatk-bridge2.0-0, libatk1.0-0, libatspi2.0-0,
+ libcairo2, libcups2, libdbus-1-3, libdrm2, libegl1, libfontconfig1,
+ libfreetype6, libgbm1, libglib2.0-0, libgtk-3-0, libnspr4, libnss3,
+ libpango-1.0-0, libx11-6, libx11-xcb1, libxcb1, libxcomposite1,
+ libxdamage1, libxext6, libxfixes3, libxrandr2, libxshmfence1,
+ fonts-liberation
 Maintainer: mikiya
 Description: X.com tweet scraper with news radar and web console
  Collects tweets from X.com via Playwright, filters and scores them with

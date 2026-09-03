@@ -25,9 +25,11 @@ chmod 640 /etc/xclawer/.env
 chown "$SERVICE_USER:$SERVICE_USER" /etc/xclawer/.env
 ln -sfn /etc/xclawer/.env "$APP_DIR/.env"
 
-echo "==> Installing Playwright Chromium (downloads ~150MB; apt deps need root)..."
+echo "==> Installing Playwright Chromium (downloads ~150MB)..."
+# 不能用 --with-deps:postinst 运行在 dpkg 锁内,apt 拿不到锁会死锁;
+# 系统依赖已在 control 的 Depends 中声明,由 apt 在 postinst 之前装好
 PLAYWRIGHT_BROWSERS_PATH="$BROWSER_DIR" \
-    "$APP_DIR/venv/bin/playwright" install --with-deps chromium
+    "$APP_DIR/venv/bin/playwright" install chromium
 chown -R "$SERVICE_USER:$SERVICE_USER" "$BROWSER_DIR"
 
 # Seed scheduler state: 60-minute collection, auto-start on boot

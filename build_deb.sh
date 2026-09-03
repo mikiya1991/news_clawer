@@ -8,6 +8,7 @@ VERSION="${1:-1.0.0}"
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 STAGING="$(mktemp -d)"
 APP_DIR="$STAGING/usr/lib/xclawer"
+mkdir -p "$APP_DIR"   # rsync 3.1.3 不会自动创建多级不存在的目标目录
 
 echo "==> 1/5 拷贝项目文件..."
 rsync -a --exclude '.git' --exclude 'venv' --exclude 'browser_state' \
@@ -22,6 +23,9 @@ python3 -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet \
     -r "$APP_DIR/requirements.txt" \
     -r "$APP_DIR/web/requirements.txt"
+
+# venv 入口脚本的 shebang 指向暂存目录,改成安装后的实际路径
+find "$APP_DIR/venv/bin" -maxdepth 1 -type f -exec sed -i "s|$APP_DIR|/usr/lib/xclawer|g" {} +
 
 echo "==> 3/5 组装 DEBIAN 控制文件..."
 mkdir -p "$STAGING/DEBIAN"
